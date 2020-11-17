@@ -71,3 +71,95 @@ func (s *IntSet) String() string {
 }
 
 //!-string
+
+// Len computes the length of the IntSet
+func (s *IntSet) Len() (len int) {
+	for _, word := range s.words {
+		if word == 0 {
+			continue
+		}
+		for i := 0; i < 64; i++ {
+			if word&(1<<uint(i)) != 0 {
+				len++
+			}
+		}
+	}
+	return
+}
+
+func (s *IntSet) Remove(x int) {
+	if s.Len() == 0 {
+		return
+	}
+
+	word, bit := x/64, uint64(x%64)
+	var mask uint64
+	mask--
+	allOnes := mask
+	mask <<= bit + 1
+	mask |= (allOnes >> (64 - bit))
+	s.words[word] &= mask
+}
+
+func (s *IntSet) Clear() {
+	for i := range s.words {
+		s.words[i] = 0
+	}
+}
+
+func (s *IntSet) Copy() *IntSet {
+	var newSet IntSet
+	for _, oldWord := range s.words {
+		newSet.words = append(newSet.words, oldWord)
+	}
+	return &newSet
+}
+
+func (s *IntSet) Equals(another *IntSet) (equals bool) {
+	if len(s.words) != len(another.words) {
+		return
+	}
+
+	for i, word := range s.words {
+		if another.words[i] != word {
+			return
+		}
+	}
+	equals = true
+	return
+}
+
+func (s *IntSet) AddAll(values ...int) {
+	for _, value := range values {
+		s.Add(value)
+	}
+}
+
+func (s *IntSet) IntersectionWith(another *IntSet) *IntSet {
+	var result IntSet
+
+	for i := 0; i < len(s.words) && i < len(another.words); i++ {
+		result.words = append(result.words, s.words[i]&another.words[i])
+	}
+
+	return &result
+}
+
+func (s *IntSet) DifferenceWith(another *IntSet) *IntSet {
+	var result IntSet
+
+	for i := 0; i < len(s.words); i++ {
+		if i < len(another.words) {
+			result.words = append(result.words, s.words[i]&^another.words[i])
+		} else {
+			result.words = append(result.words, s.words[i])
+		}
+	}
+	return &result
+}
+
+func (s *IntSet) SymmetricDifference(another *IntSet) *IntSet {
+	result := s.DifferenceWith(another)
+	result.UnionWith(another.DifferenceWith(s))
+	return result
+}
