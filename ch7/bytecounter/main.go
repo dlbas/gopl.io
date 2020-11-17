@@ -7,7 +7,11 @@
 package main
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
+	"io"
+	"unicode/utf8"
 )
 
 //!+bytecounter
@@ -21,6 +25,60 @@ func (c *ByteCounter) Write(p []byte) (int, error) {
 
 //!-bytecounter
 
+type WordCounter int
+
+func (c *WordCounter) Write(p []byte) (int, error) {
+	words := 0
+	advance, t, err := bufio.ScanWords(p, true)
+	for len(t) > 0 {
+		if err != nil {
+			return words, err
+		}
+		words++
+		p = p[advance:]
+		advance, t, err = bufio.ScanWords(p, true)
+	}
+	*c += WordCounter(words)
+	return words, nil
+}
+
+type LineCounter int
+
+func (c *LineCounter) Write(p []byte) (int, error) {
+	lines := 0
+
+	for len(p) > 0 {
+		r, size := utf8.DecodeRune(p)
+		if r == utf8.RuneError {
+			return lines, errors.New("rune error")
+		}
+
+		switch r {
+		case '\n', '\r':
+			lines++
+		}
+		p = p[size:]
+	}
+
+	*c += LineCounter(lines)
+	return lines, nil
+}
+
+type countingWriter struct {
+	w     io.Writer
+	count int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.count += int64(len(p))
+	return c.w.Write(p)
+}
+
+func CountingWriter(w io.Writer) (io.Writer, *int64) {
+	newW := &countingWriter{w: w}
+	return newW, &newW.count
+}
+
 func main() {
 	//!+main
 	var c ByteCounter
@@ -32,4 +90,23 @@ func main() {
 	fmt.Fprintf(&c, "hello, %s", name)
 	fmt.Println(c) // "12", = len("hello, Dolly")
 	//!-main
+
+	var w WordCounter
+	w.Write([]byte("polly wants a cracker"))
+	fmt.Println(w)
+
+	var l LineCounter
+	l.Write([]byte(`mary
+		had
+		a
+		little
+		lamb
+	`))
+	fmt.Println(l)
+
+	counting, count := CountingWriter(&l)
+
+	fmt.Println(*count)
+	counting.Write([]byte("фыдвлаофждыаожфдлофывжалофывджаофывадasdlfkjasdlfkjadslf"))
+	fmt.Println(*count)
 }
