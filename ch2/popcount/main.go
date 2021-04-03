@@ -29,3 +29,12 @@ func PopCount(x uint64) int {
 }
 
 //!-
+
+// Loop calculates pop count using loop
+func Loop(x uint64) int {
+	var s byte = 0
+	for i := 0; i < 8; i++ {
+		s += pc[byte(x>>(i*8))]
+	}
+	return int(s)
+}
