@@ -87,3 +87,18 @@ func BenchmarkPopCountByShifting(b *testing.B) {
 // BenchmarkBitCount-12                 2000000000        0.27 ns/op
 // BenchmarkPopCountByClearing-12       100000000        18.5 ns/op
 // BenchmarkPopCountByShifting-12       20000000         70.1 ns/op
+
+///
+/// Tests added by dlbas
+///
+
+func TestPopCountLoopIsSame(t *testing.T) {
+	var i uint64
+	for i = 0; i < 10; i++ {
+		if popcount.PopCount(i) != popcount.Loop(i) {
+			t.Fail()
+		}
+
+		t.Log(popcount.PopCount(i))
+	}
+}
