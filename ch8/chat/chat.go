@@ -12,16 +12,47 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
+	"time"
 )
 
 //!+broadcaster
-type client chan<- string // an outgoing message channel
+// type client chan<- string // an outgoing message channel
+
+const clientBuffer = 5
+
+type client struct {
+	messageCh chan<- string
+	name      string
+}
+
+type clientMessage struct {
+	client  client
+	message string
+}
 
 var (
 	entering = make(chan client)
 	leaving  = make(chan client)
-	messages = make(chan string) // all incoming client messages
+	messages = make(chan clientMessage) // all incoming client messages
 )
+
+func formatClients(clients map[client]bool) string {
+	w := strings.Builder{}
+	w.WriteString("address\n")
+	w.WriteString("----\n")
+
+	for c, v := range clients {
+		if !v {
+			continue
+		}
+
+		w.WriteString(c.name)
+		w.WriteString("\n")
+	}
+
+	return w.String()
+}
 
 func broadcaster() {
 	clients := make(map[client]bool) // all connected clients
@@ -31,39 +62,91 @@ func broadcaster() {
 			// Broadcast incoming message to all
 			// clients' outgoing message channels.
 			for cli := range clients {
-				cli <- msg
+				if msg.client == cli {
+					continue
+				}
+				go func(c client) { c.messageCh <- msg.message }(cli)
 			}
 
 		case cli := <-entering:
 			clients[cli] = true
-
+			go func() {
+				messages <- clientMessage{cli, formatClients(clients)}
+			}()
 		case cli := <-leaving:
 			delete(clients, cli)
-			close(cli)
+			close(cli.messageCh)
+			go func() {
+				messages <- clientMessage{cli, formatClients(clients)}
+			}()
 		}
 	}
+}
+
+func clientReader(conn net.Conn) <-chan string {
+	messages := make(chan string)
+	returnChan := make(chan string)
+
+	go func() {
+		input := bufio.NewScanner(conn)
+		for input.Scan() {
+			select {
+			case messages <- input.Text():
+			default:
+			}
+		}
+		close(messages)
+	}()
+
+	go func() {
+		for {
+			select {
+			case m, ok := <-messages:
+				if !ok {
+					return
+				}
+				returnChan <- m
+			case <-time.After(5 * time.Minute):
+				conn.Write([]byte("you are boring!\n"))
+				conn.Close()
+			}
+		}
+
+	}()
+
+	return returnChan
+}
+
+func readName(inCh <-chan string, outCh chan<- string) string {
+	outCh <- "Type your name:"
+
+	return <-inCh
 }
 
 //!-broadcaster
 
 //!+handleConn
 func handleConn(conn net.Conn) {
-	ch := make(chan string) // outgoing client messages
+	ch := make(chan string, clientBuffer) // outgoing client messages
 	go clientWriter(conn, ch)
+
+	reader := clientReader(conn)
+
+	name := readName(reader, ch)
 
 	who := conn.RemoteAddr().String()
 	ch <- "You are " + who
-	messages <- who + " has arrived"
-	entering <- ch
+	messages <- clientMessage{client{ch, who}, who + " has arrived"}
 
-	input := bufio.NewScanner(conn)
-	for input.Scan() {
-		messages <- who + ": " + input.Text()
+	c := client{messageCh: ch, name: who}
+	entering <- c
+
+	for m := range reader {
+		messages <- clientMessage{client{ch, who}, name + ": " + m}
 	}
-	// NOTE: ignoring potential errors from input.Err()
 
-	leaving <- ch
-	messages <- who + " has left"
+	leaving <- c
+	messages <- clientMessage{client{ch, who}, who + " has left"}
 	conn.Close()
 }
 

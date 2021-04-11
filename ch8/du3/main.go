@@ -16,11 +16,17 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 var vFlag = flag.Bool("v", false, "show verbose progress messages")
+
+type filesize struct {
+	size int64
+	path string
+}
 
 //!+
 func main() {
@@ -37,7 +43,7 @@ func main() {
 
 	//!+
 	// Traverse each root of the file tree in parallel.
-	fileSizes := make(chan int64)
+	fileSizes := make(chan filesize)
 	var n sync.WaitGroup
 	for _, root := range roots {
 		n.Add(1)
@@ -55,6 +61,8 @@ func main() {
 		tick = time.Tick(500 * time.Millisecond)
 	}
 	var nfiles, nbytes int64
+	
+	dirs := make(map[string]int64)
 loop:
 	for {
 		select {
@@ -63,15 +71,24 @@ loop:
 				break loop // fileSizes was closed
 			}
 			nfiles++
-			nbytes += size
+			nbytes += size.size
+
+			for _, r := range roots {
+				if strings.HasPrefix(size.path, r) {
+					dirs[r] += size.size
+				}
+			}
 		case <-tick:
 			printDiskUsage(nfiles, nbytes)
+			printDirDiskUsage(dirs)
 		}
 	}
 
 	printDiskUsage(nfiles, nbytes) // final totals
 	//!+
 	// ...select loop...
+
+	printDirDiskUsage(dirs)
 }
 
 //!-
@@ -80,10 +97,16 @@ func printDiskUsage(nfiles, nbytes int64) {
 	fmt.Printf("%d files  %.1f GB\n", nfiles, float64(nbytes)/1e9)
 }
 
+func printDirDiskUsage(dirs map[string]int64) {
+	for k, v := range dirs {
+		fmt.Printf("%s:\t%.2f MB\n", k, float64(v / 1e6))
+	}
+}
+
 // walkDir recursively walks the file tree rooted at dir
 // and sends the size of each found file on fileSizes.
 //!+walkDir
-func walkDir(dir string, n *sync.WaitGroup, fileSizes chan<- int64) {
+func walkDir(dir string, n *sync.WaitGroup, fileSizes chan<- filesize) {
 	defer n.Done()
 	for _, entry := range dirents(dir) {
 		if entry.IsDir() {
@@ -91,7 +114,7 @@ func walkDir(dir string, n *sync.WaitGroup, fileSizes chan<- int64) {
 			subdir := filepath.Join(dir, entry.Name())
 			go walkDir(subdir, n, fileSizes)
 		} else {
-			fileSizes <- entry.Size()
+			fileSizes <- filesize{path: filepath.Join(dir, entry.Name()), size: entry.Size()}
 		}
 	}
 }
